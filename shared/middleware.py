@@ -14,7 +14,7 @@ class TracingMiddleware(BaseHTTPMiddleware):
             context=ctx,
         ) as span:
             span.set_attribute("http.method", request.method)
-            span.set_attribute("http.target", request.url.path)
+            span.set_attribute("http.url", str(request.url))
 
             response = await call_next(request)
 

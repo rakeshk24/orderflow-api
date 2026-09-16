@@ -50,12 +50,16 @@ async def create_order(
         headers: dict[str, str] = {}
         inject(headers)
 
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                f"{ORDER_SERVICE_URL}/internal/orders",
-                json={"user_id": current_user_id, "items": body.items, "amount": body.amount},
-                headers=headers,
-            )
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                resp = await client.post(
+                    f"{ORDER_SERVICE_URL}/internal/orders",
+                    json={"user_id": current_user_id, "items": body.items, "amount": body.amount},
+                    headers=headers,
+                )
+        except httpx.TimeoutException as e:
+            logger.error(f"Order service timed out: {e}")
+            raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="Order service unavailable")
 
         if resp.status_code != 201:
             raise HTTPException(status_code=resp.status_code, detail=resp.text)

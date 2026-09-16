@@ -46,6 +46,34 @@ reviews:
         - Use log levels correctly: DEBUG for internal flow, INFO for business events, WARNING for recoverable
           issues, ERROR for failures that require attention.
 
+        ---
+        ## PRE-MERGE HARD BLOCKS — Request changes and block merge if any of the following are violated:
+
+        ### [BLOCK-1] OTel Semantic Conventions — http.route is mandatory on server spans
+        Server-side spans MUST set the `http.route` attribute to the parameterised URL template
+        (e.g. `/orders/{order_id}`), NOT the resolved URL containing actual values.
+        Setting `http.url` or `http.target` with a resolved path (e.g. `/orders/abc-123`) creates a unique
+        span per request, causing cardinality explosion in Dynatrace — service maps break and costs spike.
+        BLOCK this PR if any span sets `http.url` or `http.target` to a value that contains a path segment
+        that looks like an ID (UUID, numeric ID, hash). The fix is to set `http.route` to the template string.
+
+        ### [BLOCK-2] GDPR — Exception messages recorded on spans must not contain PII
+        `span.record_exception(e)` exports the exception type AND its message to the APM backend (Dynatrace,
+        Datadog), where it is indexed and retained. If the exception message contains a user's email, name,
+        phone, or any personal identifier, this is a GDPR Article 5 violation.
+        BLOCK this PR if any exception is constructed with PII interpolated into its message string and that
+        exception is (or could be) passed to `span.record_exception()`. The fix is to use opaque IDs only:
+        raise ValueError(f"User {user_id} is not eligible") not raise ValueError(f"User {email} is not eligible").
+
+        ### [BLOCK-3] OTel — Caught exceptions MUST update span status to ERROR
+        Any `except` block that handles an exception inside an active span context MUST call BOTH:
+          1. `span.record_exception(e)` — attaches the exception event to the span
+          2. `span.set_status(StatusCode.ERROR, description=str(e))` — marks the span as failed
+        Calling only `logger.error(...)` leaves the span status as UNSET (green) in Dynatrace.
+        During an outage, every affected request appears healthy in APM while alerts fire in logs —
+        making incident response significantly harder.
+        BLOCK this PR if any except block logs an error or returns a fallback without updating span status.
+
     - path: "**/requirements*.txt"
       instructions: |
         Check all pinned package versions for known CVEs. Pay special attention to:
