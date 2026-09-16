@@ -10,7 +10,7 @@ class TracingMiddleware(BaseHTTPMiddleware):
 
         tracer = trace.get_tracer(__name__)
         with tracer.start_as_current_span(
-            f"{request.method} {request.url.path}",
+            f"{request.method} {str(request.url)}",
             context=ctx,
         ) as span:
             span.set_attribute("http.method", request.method)
