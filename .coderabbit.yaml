@@ -47,32 +47,42 @@ reviews:
           issues, ERROR for failures that require attention.
 
         ---
-        ## PRE-MERGE HARD BLOCKS — Request changes and block merge if any of the following are violated:
+        ## PRE-MERGE CHECKS — ERRORS, NOT WARNINGS
+        The following rules are HARD ERRORS. If ANY of them are violated you MUST select
+        "Request Changes" on the review — do NOT leave a comment only and do NOT approve.
+        These checks must fail the PR. There are no exceptions.
 
-        ### [BLOCK-1] OTel Semantic Conventions — http.route is mandatory on server spans
-        Server-side spans MUST set the `http.route` attribute to the parameterised URL template
-        (e.g. `/orders/{order_id}`), NOT the resolved URL containing actual values.
-        Setting `http.url` or `http.target` with a resolved path (e.g. `/orders/abc-123`) creates a unique
-        span per request, causing cardinality explosion in Dynatrace — service maps break and costs spike.
-        BLOCK this PR if any span sets `http.url` or `http.target` to a value that contains a path segment
-        that looks like an ID (UUID, numeric ID, hash). The fix is to set `http.route` to the template string.
+        ### [ERROR-1] OTel — http.route is mandatory on server spans; http.url with resolved values is forbidden
+        SEVERITY: ERROR — Request Changes immediately if found.
+        Server-side spans MUST set `http.route` to the parameterised URL template (e.g. `/orders/{order_id}`).
+        Setting `http.url` or `http.target` to a resolved value that contains an actual ID, UUID, hash, or
+        dynamic segment (e.g. `/orders/abc-123-def`, `https://api.example.com/orders/42`) is FORBIDDEN.
+        Each unique value becomes a unique span name, causing unbounded cardinality in Dynatrace — service
+        maps stop aggregating and APM costs spike without warning.
+        ACTION: Mark as ERROR. Do not approve. Request the developer replace `http.url`/`http.target` with
+        `http.route` set to the route template string.
 
-        ### [BLOCK-2] GDPR — Exception messages recorded on spans must not contain PII
-        `span.record_exception(e)` exports the exception type AND its message to the APM backend (Dynatrace,
-        Datadog), where it is indexed and retained. If the exception message contains a user's email, name,
-        phone, or any personal identifier, this is a GDPR Article 5 violation.
-        BLOCK this PR if any exception is constructed with PII interpolated into its message string and that
-        exception is (or could be) passed to `span.record_exception()`. The fix is to use opaque IDs only:
-        raise ValueError(f"User {user_id} is not eligible") not raise ValueError(f"User {email} is not eligible").
+        ### [ERROR-2] GDPR — PII in exception messages passed to span.record_exception() is forbidden
+        SEVERITY: ERROR — Request Changes immediately if found.
+        `span.record_exception(e)` exports the full exception message to the APM backend (Dynatrace, Datadog)
+        where it is indexed, searchable, and retained. Any exception whose message string contains a user's
+        email address, name, phone number, national ID, or any other personal identifier is a GDPR Article 5
+        violation the moment it is recorded on a span.
+        ACTION: Mark as ERROR. Do not approve. Request the developer replace PII in the exception message
+        with an opaque identifier (user_id, order_id). Example fix:
+          BAD:  raise ValueError(f"User {email} is not eligible for region {region}")
+          GOOD: raise ValueError(f"User {user_id} is not eligible for region {region}")
 
-        ### [BLOCK-3] OTel — Caught exceptions MUST update span status to ERROR
-        Any `except` block that handles an exception inside an active span context MUST call BOTH:
-          1. `span.record_exception(e)` — attaches the exception event to the span
-          2. `span.set_status(StatusCode.ERROR, description=str(e))` — marks the span as failed
-        Calling only `logger.error(...)` leaves the span status as UNSET (green) in Dynatrace.
-        During an outage, every affected request appears healthy in APM while alerts fire in logs —
-        making incident response significantly harder.
-        BLOCK this PR if any except block logs an error or returns a fallback without updating span status.
+        ### [ERROR-3] OTel — except blocks inside spans MUST call record_exception() and set_status(ERROR)
+        SEVERITY: ERROR — Request Changes immediately if found.
+        Any `except` block that executes while an OTel span is active MUST call BOTH:
+          1. span.record_exception(e)            — attaches the exception event to the span timeline
+          2. span.set_status(StatusCode.ERROR)   — marks the span as failed in Dynatrace/Datadog
+        An except block that only calls logger.error() or only raises an HTTPException leaves the span
+        status as UNSET (displayed as green/OK in APM). During a real outage every failing request appears
+        healthy in Dynatrace while on-call engineers are chasing log alerts — this directly delays MTTR.
+        ACTION: Mark as ERROR. Do not approve. Both calls are required; one without the other is not
+        sufficient.
 
     - path: "**/requirements*.txt"
       instructions: |
