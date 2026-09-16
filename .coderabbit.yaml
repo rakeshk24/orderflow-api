@@ -1,0 +1,62 @@
+language: "en-US"
+reviews:
+  profile: "assertive"
+  request_changes_workflow: true
+  high_level_summary: true
+  poem: false
+  review_status: true
+  path_instructions:
+    - path: "**/*.py"
+      instructions: |
+        ## Observability & Compliance Review Standards
+
+        ### OpenTelemetry — Trace Propagation (CRITICAL)
+        - Every outgoing HTTP call MUST inject W3C trace context headers before the request:
+          `from opentelemetry.propagate import inject; inject(headers)` — missing this breaks the distributed trace chain.
+        - Incoming requests MUST extract trace context via `opentelemetry.propagate.extract(request.headers)`
+          and pass it as the `context=` argument when starting a span. Creating a root span when a traceparent
+          header is present silently orphans the trace.
+        - The `trace_id` and `span_id` from the active span must be included in every structured log entry
+          within that request's scope. Use `trace.get_current_span().get_span_context()` to retrieve them.
+        - Span names must follow the convention `<service>.<operation>` (e.g. `order-service.create_order`).
+        - Every public API endpoint and every critical business operation (payment, auth, order creation)
+          must be wrapped in its own span with at minimum: `http.method`, `http.target`, `http.status_code`.
+
+        ### PII / GDPR (CRITICAL)
+        - NEVER log PII: email addresses, phone numbers, national IDs (SSN, etc.), passwords, or auth tokens.
+          Use opaque identifiers (user_id, order_id) in log messages instead.
+        - NEVER set PII as span or trace attributes. Span attributes are exported to your APM backend
+          (Dynatrace / Datadog) and may be stored indefinitely.
+        - Payment card data (PAN, CVV, expiry) must NEVER appear in logs, traces, or error responses — PCI DSS §3.
+        - Error responses must not expose raw database rows or model objects that contain sensitive fields.
+          Use explicit response schemas (Pydantic `response_model`) to control what is returned.
+
+        ### Security — OWASP / FedRAMP
+        - SQL queries must ALWAYS use parameterized queries or an ORM. String interpolation or f-strings
+          in SQL are SQL injection vulnerabilities (OWASP A03:2021).
+        - Secrets (API keys, DB passwords, JWT secrets) must NEVER be hardcoded. Read them from environment
+          variables via `os.environ` or a secrets manager. Flag any literal that looks like a key or password.
+        - All resource-mutating endpoints (DELETE, PUT, PATCH) must verify the authenticated user owns
+          the resource before acting. Missing ownership checks are broken access control (OWASP A01:2021).
+        - Validate and bound-check all numeric inputs (amounts, quantities) — negative values must be rejected.
+
+        ### Structured Logging
+        - Log entries inside a traced context must include `trace_id` and `span_id` fields.
+        - Do not log raw request payloads or response bodies — these routinely contain PII.
+        - Use log levels correctly: DEBUG for internal flow, INFO for business events, WARNING for recoverable
+          issues, ERROR for failures that require attention.
+
+    - path: "**/requirements*.txt"
+      instructions: |
+        Check all pinned package versions for known CVEs. Pay special attention to:
+        - `python-jose` — CVE-2024-33664 and CVE-2024-33663 affect versions < 3.4.0 (algorithm confusion attacks).
+        - `cryptography` — versions below 42.0.0 have multiple reported CVEs.
+        - `opentelemetry-*` — ensure all otel packages are from the official `opentelemetry-*` namespace
+          and that sdk/api/exporter versions are aligned (version mismatch causes silent telemetry loss).
+        Flag any package where a patch is available that addresses a security advisory.
+
+  tools:
+    github-checks:
+      enabled: true
+    ast-grep:
+      enabled: true
