@@ -57,7 +57,7 @@ reviews:
 
   pre_merge_checks:
     custom_checks:
-      - name: "OTel: http.route required on server spans — resolved URLs forbidden"
+      - name: "OTel: http.route required, not resolved URL"
         mode: "error"
         instructions: |
           Fail if any server-side span sets http.url or http.target to a resolved value that contains
@@ -68,7 +68,7 @@ reviews:
           Pass only if the span sets http.route to a static parameterised template string
           (e.g. "/orders/{order_id}") and does NOT set http.url or http.target to a resolved value.
 
-      - name: "GDPR: PII must not appear in exception messages passed to span.record_exception()"
+      - name: "GDPR: No PII in span.record_exception() messages"
         mode: "error"
         instructions: |
           Fail if any exception is constructed with a user's email address, name, phone number,
@@ -80,7 +80,7 @@ reviews:
           Example that must fail: raise ValueError(f"User {email} is not eligible for region {region}")
           Example that must pass:  raise ValueError(f"User {user_id} is not eligible for region {region}")
 
-      - name: "OTel: except blocks inside active spans must call record_exception() and set_status(ERROR)"
+      - name: "OTel: except blocks must set span status ERROR"
         mode: "error"
         instructions: |
           Fail if any except block that executes while an OTel span is active does not call BOTH:
