@@ -2,6 +2,8 @@ import logging
 
 from opentelemetry import trace
 
+from shared.metrics import orders_created, payment_amount
+
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
 
@@ -16,5 +18,8 @@ async def process_payment(order_data: dict) -> dict:
             "order_id": order_data.get("order_id"),
             "amount": order_data.get("amount"),
         })
+
+        orders_created.add(1)
+        payment_amount.add(order_data.get("amount", 0))
 
         return {"status": "charged", "amount": order_data.get("amount")}
