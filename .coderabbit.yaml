@@ -20,7 +20,7 @@ reviews:
           within that request's scope. Use `trace.get_current_span().get_span_context()` to retrieve them.
         - Span names must follow the convention `<service>.<operation>` (e.g. `order-service.create_order`).
         - Every public API endpoint and every critical business operation (payment, auth, order creation)
-          must be wrapped in its own span with at minimum: `http.method`, `http.target`, `http.status_code`.
+          must be wrapped in its own span with at minimum: `http.method`, `http.route`, `http.status_code`.
 
         ### PII / GDPR (CRITICAL)
         - NEVER log PII: email addresses, phone numbers, national IDs (SSN, etc.), passwords, or auth tokens.
@@ -54,6 +54,43 @@ reviews:
         - `opentelemetry-*` — ensure all otel packages are from the official `opentelemetry-*` namespace
           and that sdk/api/exporter versions are aligned (version mismatch causes silent telemetry loss).
         Flag any package where a patch is available that addresses a security advisory.
+
+  pre_merge_checks:
+    custom_checks:
+      - name: "OTel: http.route required, not resolved URL"
+        mode: "error"
+        instructions: |
+          Fail if any server-side span sets http.url or http.target to a resolved value that contains
+          actual path segments, IDs, UUIDs, hashes, or query parameters (e.g. str(request.url),
+          f"/orders/{order_id}", or any dynamic value interpolated into the attribute).
+          Each unique resolved URL becomes a unique span name, causing unbounded cardinality in Dynatrace
+          and breaking APM service map aggregation.
+          Pass only if the span sets http.route to a static parameterised template string
+          (e.g. "/orders/{order_id}") and does NOT set http.url or http.target to a resolved value.
+
+      - name: "GDPR: No PII in span.record_exception() messages"
+        mode: "error"
+        instructions: |
+          Fail if any exception is constructed with a user's email address, name, phone number,
+          national ID, or any other personal identifier interpolated into its message string, AND
+          that exception is passed (directly or indirectly) to span.record_exception().
+          span.record_exception() exports the full exception message to the APM backend (Dynatrace, Datadog)
+          where it is indexed and retained — this is a GDPR Article 5 violation.
+          Pass only if exception messages use opaque identifiers exclusively (user_id, order_id, etc.).
+          Example that must fail: raise ValueError(f"User {email} is not eligible for region {region}")
+          Example that must pass:  raise ValueError(f"User {user_id} is not eligible for region {region}")
+
+      - name: "OTel: except blocks must set span status ERROR"
+        mode: "error"
+        instructions: |
+          Fail if any except block that executes while an OTel span is active does not call BOTH:
+            1. span.record_exception(e)
+            2. span.set_status(StatusCode.ERROR, description=str(e))
+          An except block that only calls logger.error() or only raises an HTTPException leaves the span
+          status as UNSET (shown as green/OK in Dynatrace and Datadog). During a real outage every failing
+          request appears healthy in APM while on-call engineers chase log alerts — this directly increases MTTR.
+          Calling one without the other is not sufficient — both are required.
+          Pass only if both calls are present before the exception is re-raised or a fallback is returned.
 
   tools:
     github-checks:
