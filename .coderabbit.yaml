@@ -55,6 +55,111 @@ reviews:
           and that sdk/api/exporter versions are aligned (version mismatch causes silent telemetry loss).
         Flag any package where a patch is available that addresses a security advisory.
 
+    - path: "infra/k8s/**/*.yaml"
+      instructions: |
+        ## Kubernetes Manifest Review — SRE / Platform Safety
+
+        ### Availability & Reliability (CRITICAL)
+        - `replicas` must be >= 2 for any production Deployment — a single replica is a single point of failure.
+          Any reduction in replica count from a previously higher value is a high-blast-radius change: flag it
+          with the original count and the potential impact on request handling during pod restarts.
+        - `readinessProbe` is mandatory on all containers. Removing it means traffic is sent to pods that are
+          not yet ready, causing request failures during rollouts. Flag any Deployment that lacks one.
+        - `livenessProbe` should be present; its absence means crashed pods are never restarted.
+        - `resources.requests` and `resources.limits` must be set. A missing `limits.memory` allows a pod to
+          consume all node memory and cause OOM kills for co-located workloads.
+        - Raising `limits.memory` by more than 2x or setting it above 2Gi warrants a comment explaining
+          the expected working set — this is a common cause of node pressure.
+        - Image tags must be pinned to a specific digest or immutable tag; `latest` or branch-name tags
+          are non-deterministic and cannot be rolled back reliably.
+
+        ### Security
+        - `securityContext.privileged: true` grants the container near-root access to the host. Flag any
+          container with this set — it should almost never appear in production manifests.
+        - Secrets must be injected via `secretKeyRef` or a secrets CSI driver, never as a plain `env.value`.
+        - `hostNetwork: true`, `hostPID: true`, or `hostIPC: true` broaden the blast radius of a container
+          compromise — flag these.
+
+    - path: "infra/terraform/**/*.tf"
+      instructions: |
+        ## Terraform / IaC Review — Security & Blast Radius
+
+        ### IAM & Permissions (CRITICAL)
+        - `Action: "*"` or `Resource: "*"` in an IAM policy grants full AWS access or access to all resources
+          of a type. This violates least-privilege (NIST 800-53 AC-6) and fails FedRAMP controls. Always flag
+          and suggest scoping to the minimum required actions and specific resource ARNs.
+        - Wildcard policies on `secretsmanager:*` or `s3:*` with `Resource: "*"` are particularly dangerous —
+          they allow exfiltration of all secrets or data in the account.
+        - IAM role assumption (`sts:AssumeRole`) should be restricted to specific principals; a broad
+          `Principal: "*"` makes a role assumable by anyone in or outside the account.
+
+        ### Network Security
+        - `cidr_blocks = ["0.0.0.0/0"]` on any port other than 80/443 is an internet-exposure risk.
+          SSH (22), RDP (3389), and database ports (5432, 3306, 6379) open to the world are critical findings.
+        - Security group rules that open port ranges like `0-65535` to `0.0.0.0/0` are equivalent to
+          disabling the firewall — flag these immediately.
+        - Ingress rules that have a legitimate reason to be open (e.g. HTTP/HTTPS) should be called out
+          as intentional, with a note about what they serve.
+
+        ### Data & State
+        - S3 buckets storing order or audit data must have `versioning { enabled = true }` and must NOT use
+          `acl = "public-read"` or `acl = "public-read-write"`.
+        - Terraform state should be stored in a remote backend (S3 + DynamoDB locking); a local `terraform.tfstate`
+          in the repo is both a secrets leak and a collaboration hazard.
+        - Pin all Terraform module sources and provider versions; unpinned versions make plans non-deterministic.
+
+    - path: "infra/config/**"
+      instructions: |
+        ## Operational Config Review — Config Drift & Reliability
+
+        ### nginx.conf
+        - `proxy_read_timeout` below 10s is likely too aggressive for a payment or order API where downstream
+          calls (DB, payment processor) can take several seconds under load. A value of 3s will cause spurious
+          504s during peak traffic — flag it and suggest a value aligned with the p99 latency of downstream services.
+        - `proxy_connect_timeout` and `proxy_send_timeout` should also be reasonable; sub-5s connect timeouts
+          can cause failures when upstream pods are cold-starting.
+        - Always check that `keepalive` is configured on upstreams for connection reuse.
+
+        ### prometheus.yml / alerts.yml
+        - `scrape_interval` above 30s makes dashboards laggy and alert `for:` durations unreliable.
+          60s is too slow for latency or error-rate signals in a payment system.
+        - Alert rules must include a `for:` duration to avoid flapping on transient spikes. A rule without
+          `for:` fires immediately on the first scrape that satisfies the condition.
+        - `evaluation_interval` should match or be a multiple of `scrape_interval`; mismatches cause
+          missed evaluation windows.
+
+    - path: ".github/workflows/**/*.yml"
+      instructions: |
+        ## GitHub Actions Review — CI/CD Security & Change Safety
+
+        ### Trigger Security (CRITICAL)
+        - `pull_request_target` runs in the context of the *base* branch with full write access to secrets.
+          Combined with `actions/checkout` of the PR's head SHA, this allows untrusted code to exfiltrate
+          secrets. This is a well-known supply chain attack vector (GitHub Security Advisory). Flag any
+          use of `pull_request_target` that also checks out PR code.
+        - `permissions: write-all` grants every available token permission to every job. Scope permissions
+          to the minimum required (`contents: read`, `pull-requests: write`, etc.).
+
+        ### Action Pinning
+        - All `uses:` references must be pinned to a commit SHA, not a branch name or mutable tag.
+          `actions/checkout@main` means a compromised upstream repo can inject arbitrary code into your
+          pipeline. Use `actions/checkout@<sha>` instead.
+        - Flag any action not pinned to a SHA — this includes first-party GitHub actions.
+
+        ### Secret Handling
+        - Secrets must NEVER be echoed to stdout: `echo "${{ secrets.X }}"` leaks the secret to the
+          public job log. This is a critical finding.
+        - Secrets must not be passed as CLI arguments where they appear in `ps` output.
+
+        ### Deployment Safety
+        - Production deployments must have an approval gate (`environment: production` with required reviewers
+          configured in GitHub's environment settings). Removing this gate allows any merged commit to
+          deploy to production without human review.
+        - Every job should have `timeout-minutes` set; a hung job without a timeout blocks the runner
+          indefinitely and can exhaust concurrency limits.
+        - Rollback or verification steps after deployment (`kubectl rollout status`) are good practice —
+          flag their absence.
+
   tools:
     github-checks:
       enabled: true

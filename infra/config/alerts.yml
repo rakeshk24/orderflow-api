@@ -1,0 +1,23 @@
+groups:
+  - name: orderflow.critical
+    rules:
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.05
+        labels:
+          severity: critical
+        annotations:
+          summary: "High error rate on {{ $labels.service }}"
+
+      - alert: PaymentServiceDown
+        expr: up{job="order-service"} == 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "Order service is down"
+
+      - alert: HighLatency
+        expr: histogram_quantile(0.99, rate(request_duration_seconds_bucket[5m])) > 2
+        labels:
+          severity: warning
+        annotations:
+          summary: "P99 latency above 2s on {{ $labels.service }}"
