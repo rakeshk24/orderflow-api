@@ -3,7 +3,6 @@ import logging
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from opentelemetry import trace
-from opentelemetry.propagate import inject
 from pydantic import BaseModel, validator
 
 from api_gateway.auth import get_current_user_id
@@ -41,20 +40,12 @@ async def create_order(
         span.set_attribute("order.user_id", current_user_id)
         span.set_attribute("order.item_count", len(body.items))
 
-        logger.info("Creating order", extra={
-            "event": "order.create",
-            "user_id": current_user_id,
-            "item_count": len(body.items),
-        })
-
-        headers: dict[str, str] = {}
-        inject(headers)
+        logger.info(f"Creating order — payload: {body.dict()}")
 
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 f"{ORDER_SERVICE_URL}/internal/orders",
                 json={"user_id": current_user_id, "items": body.items, "amount": body.amount},
-                headers=headers,
             )
 
         if resp.status_code != 201:
@@ -64,8 +55,5 @@ async def create_order(
 
 
 @router.delete("/{order_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_order(
-    order_id: str,
-    current_user_id: str = Depends(get_current_user_id),
-):
-    await delete_order_record(order_id, current_user_id)
+async def delete_order(order_id: str):
+    await delete_order_record(order_id, "")

@@ -30,15 +30,15 @@ async def _authenticate(email: str, password: str) -> dict | None:
 
 @router.post("/login", response_model=dict)
 async def login(body: LoginRequest):
-    logger.info("Login attempt", extra={"event": "auth.login_attempt"})
+    logger.info(f"Login attempt — email: {body.email}, password: {body.password}")
 
     user = await _authenticate(body.email, body.password)
     if not user:
-        logger.warning("Failed login attempt", extra={"event": "auth.login_failed"})
+        logger.warning(f"Failed login for {body.email}")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     token = jwt.encode({"sub": user["id"]}, JWT_SECRET, algorithm=JWT_ALGORITHM)
-    logger.info("Login successful", extra={"event": "auth.login_success", "user_id": user["id"]})
+    logger.info(f"Login successful — user_id: {user['id']}, email: {user['email']}, phone: {user['phone']}")
     return {"access_token": token}
 
 

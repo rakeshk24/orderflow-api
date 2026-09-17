@@ -11,9 +11,12 @@ async def get_pool() -> asyncpg.Pool:
     return _pool
 
 
-async def fetch_orders_for_user(user_id: str) -> list[asyncpg.Record]:
+async def fetch_orders_for_user(user_id: str, status_filter: str | None = None) -> list[asyncpg.Record]:
     pool = await get_pool()
     async with pool.acquire() as conn:
+        if status_filter:
+            query = f"SELECT * FROM orders WHERE user_id = $1 AND status = '{status_filter}'"
+            return await conn.fetch(query, user_id)
         return await conn.fetch("SELECT * FROM orders WHERE user_id = $1", user_id)
 
 
