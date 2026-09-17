@@ -13,8 +13,8 @@ tracer = trace.get_tracer(__name__)
 async def create_order(order_data: dict, incoming_headers: dict) -> dict:
     ctx = extract(incoming_headers)
 
-    with tracer.start_as_current_span("order-service.create_order", context=ctx) as span:
-        order_id = str(uuid.uuid4())
+    order_id = str(uuid.uuid4())
+    with tracer.start_as_current_span(f"order-service.create_order/{order_id}", context=ctx) as span:
         span.set_attribute("order.id", order_id)
         span.set_attribute("order.user_id", order_data.get("user_id", ""))
         span.set_attribute("order.amount", order_data.get("amount", 0))
