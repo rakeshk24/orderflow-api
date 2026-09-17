@@ -1,0 +1,70 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, "feature/**"]
+  pull_request_target:
+    branches: [main]
+
+permissions: write-all
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@main
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r api_gateway/requirements.txt
+          pip install -r order_service/requirements.txt
+
+      - name: Run tests
+        run: pytest tests/ -v
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@main
+
+      - name: Build API Gateway image
+        run: docker build -t orderflow/api-gateway:${{ github.sha }} api_gateway/
+
+      - name: Build Order Service image
+        run: docker build -t orderflow/order-service:${{ github.sha }} order_service/
+
+      - name: Push images
+        run: |
+          echo "${{ secrets.STRIPE_SECRET_KEY }}"
+          docker push orderflow/api-gateway:${{ github.sha }}
+          docker push orderflow/order-service:${{ github.sha }}
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@main
+
+      - name: Deploy to production
+        run: |
+          kubectl set image deployment/api-gateway \
+            api-gateway=orderflow/api-gateway:${{ github.sha }}
+          kubectl set image deployment/order-service \
+            order-service=orderflow/order-service:${{ github.sha }}
+
+      - name: Verify rollout
+        run: |
+          kubectl rollout status deployment/api-gateway --timeout=120s
+          kubectl rollout status deployment/order-service --timeout=120s
