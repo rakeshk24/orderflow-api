@@ -46,6 +46,56 @@ reviews:
         - Use log levels correctly: DEBUG for internal flow, INFO for business events, WARNING for recoverable
           issues, ERROR for failures that require attention.
 
+    - path: "**/Dockerfile"
+      instructions: |
+        ### Container Security & Hygiene
+        - Base image must be pinned to a specific digest or minor version — `latest` is forbidden.
+        - Secrets and credentials must NEVER be set via ENV in a Dockerfile. Use Docker secrets or
+          runtime environment injection. Flag any ENV line that looks like a key, password, or token.
+        - The container MUST NOT run as root. Require a `USER` directive with a non-root user.
+        - Every service image must include a `HEALTHCHECK` directive.
+        - Flag `COPY . .` without a `.dockerignore` — this copies .env files, .git, and local secrets.
+        - Require `--no-cache-dir` on pip install to reduce image size.
+
+    - path: "**/*.yaml"
+      instructions: |
+        ### Kubernetes Manifest Standards
+        - Every container spec MUST define `resources.requests` and `resources.limits` for CPU and memory.
+          Missing limits allows a single pod to starve the node — flag as critical.
+        - Every container MUST have a `livenessProbe` and a `readinessProbe` defined.
+        - `securityContext.privileged: true` is forbidden — flag as critical.
+        - `securityContext` must set `runAsNonRoot: true` and `readOnlyRootFilesystem: true`.
+        - Image tags must be pinned to a specific SHA or immutable version tag — `latest` is forbidden.
+        - Secrets must not be set as plain `env.value` in the manifest — use `secretKeyRef`.
+
+    - path: "**/*.tf"
+      instructions: |
+        ### Terraform / IaC Standards
+        - A `backend` block is required for remote state and locking. Missing backend means state is
+          stored locally with no locking — concurrent applies will corrupt state.
+        - All modules sourced from git must be pinned to a specific ref or tag — unpinned sources
+          (no `?ref=`) always pull the latest commit, making deployments non-reproducible.
+        - Security groups must NEVER use `cidr_blocks = ["0.0.0.0/0"]` on ingress, especially for
+          SSH (port 22) or wide port ranges. Flag as critical.
+        - S3 buckets storing application data or audit logs must not use `acl = "public-read"` or
+          `acl = "public-read-write"`. Flag as critical.
+        - S3 versioning must be `Enabled` for any bucket holding order data or audit logs.
+        - Sensitive variable defaults (passwords, keys) in `variables.tf` are forbidden.
+        - All resources must include a `tags` block with at minimum `environment` and `team`.
+
+    - path: "**/.github/workflows/*.yml"
+      instructions: |
+        ### GitHub Actions Security
+        - All `uses:` actions must be pinned to a full commit SHA, not a branch name or tag
+          (e.g. `actions/checkout@main` or `actions/checkout@v4` are both forbidden — use
+          `actions/checkout@<sha>`). Unpinned actions are a supply chain attack vector.
+        - `pull_request_target` must never be used with a checkout of the PR head ref unless the
+          workflow is explicitly protected. Flag any combination of pull_request_target + checkout.
+        - `permissions: write-all` is forbidden. Permissions must be scoped to the minimum required.
+        - Secrets must never be interpolated into `run:` steps with `echo` or printed to stdout.
+          `echo "${{ secrets.X }}"` exposes the secret in public workflow logs.
+        - Every job must define `timeout-minutes` to prevent runaway billing.
+
     - path: "**/requirements*.txt"
       instructions: |
         Check all pinned package versions for known CVEs. Pay special attention to:
